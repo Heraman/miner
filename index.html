@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor Saldo Unminable (PEPE)</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #fff;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            max-width: 600px;
+            margin: 20px auto;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .balance-info, .status-info {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #e9e9e9;
+            border-radius: 4px;
+        }
+        .balance-info strong {
+            font-size: 1.2em;
+            color: #007bff;
+        }
+        #balance-value {
+            font-weight: bold;
+        }
+        .controls button {
+            padding: 10px 15px;
+            margin-right: 10px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            color: #fff;
+        }
+        .start-button {
+            background-color: #28a745;
+        }
+        .stop-button {
+            background-color: #dc3545;
+        }
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+         .warning strong {
+             display: block;
+             margin-bottom: 5px;
+         }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Monitor Saldo Unminable (PEPE)</h1>
+
+    <div class="balance-info">
+        Saldo PEPE Saat Ini: <strong id="balance-value">Memuat...</strong>
+    </div>
+
+    <div class="status-info">
+        Status: <span id="status-message">Idle</span>
+        <br>
+        Pemeriksaan Terakhir: <span id="last-checked">Belum ada</span>
+    </div>
+
+    <div class="controls">
+        <button class="start-button" onclick="startMonitoring()">Start Monitoring</button>
+        <button class="stop-button" onclick="stopMonitoring()">Stop Monitoring</button>
+    </div>
+
+    <div class="warning">
+        <strong>PERINGATAN KEAMANAN:</strong> Menjalankan ini di browser membuat Token Bot Telegram Anda terlihat oleh siapa saja yang memeriksa kode sumber halaman ini. Ini SANGAT TIDAK AMAN.
+        <br>
+        <strong>PERINGATAN FUNGSI:</strong> Notifikasi Telegram kemungkinan besar akan GAGAL karena pembatasan CORS browser. Metode ini tidak direkomendasikan untuk notifikasi yang andal.
+        <br>
+        <strong>PERINGATAN KETAHANAN:</strong> Pemantauan akan berhenti jika Anda menutup tab browser ini.
+    </div>
+</div>
+
+<script>
+    // --- KONFIGURASI (HARAP BACA PERINGATAN DI ATAS!) ---
+    const UNMINABLE_API_URL = 'https://api.unminable.com/v5/address/0x82684d4316c55b4c99037e4928156a287021a3eb?coin=PEPE';
+    const TELEGRAM_BOT_TOKEN = '7635173250:AAHB8oyPSMKVqp4JoipzAIZ2630eDA7tjws'; // <-- GANTI INI! (RISIKO KEAMANAN)
+    const TELEGRAM_CHAT_ID = '7559874851';   // <-- GANTI INI!
+    const CHECK_INTERVAL_MS = 5 * 60 * 1000; // Periksa setiap 5 menit (dalam milidetik)
+    // ----------------------------------------------------
+
+    let previousBalance = null; // Menyimpan saldo terakhir
+    let intervalId = null; // Untuk menyimpan ID interval agar bisa dihentikan
+
+    // Referensi ke elemen HTML
+    const balanceValueElement = document.getElementById('balance-value');
+    const statusMessageElement = document.getElementById('status-message');
+    const lastCheckedElement = document.getElementById('last-checked');
+
+    /**
+     * Mengirim pesan ke Telegram Bot (MUNGKIN GAGAL KARENA CORS)
+     * @param {string} message Pesan yang akan dikirim
+     */
+    async function sendTelegramMessage(message) {
+        console.warn("Mencoba mengirim pesan ke Telegram. Ini mungkin gagal karena pembatasan CORS browser.");
+        if (!TELEGRAM_BOT_TOKEN || TELEGRAM_BOT_TOKEN === 'GANTI_DENGAN_TOKEN_BOT_ANDA') {
+            console.error("Error: Telegram Bot Token belum diatur.");
+            statusMessageElement.textContent = "Error: Token Bot belum diatur.";
+            statusMessageElement.style.color = 'red';
+            return;
+        }
+        if (!TELEGRAM_CHAT_ID || TELEGRAM_CHAT_ID === 'GANTI_DENGAN_CHAT_ID_ANDA') {
+            console.error("Error: Telegram Chat ID belum diatur.");
+            statusMessageElement.textContent = "Error: Chat ID belum diatur.";
+            statusMessageElement.style.color = 'red';
+            return;
+        }
+
+        const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+        const params = new URLSearchParams({
+            chat_id: TELEGRAM_CHAT_ID,
+            text: message,
+            parse_mode: 'Markdown' // Opsional
+        });
+
+        try {
+            const response = await fetch(`${telegramApiUrl}?${params.toString()}`, { method: 'GET' });
+            const data = await response.json(); // Ini akan GAGAL jika ada error CORS sebelum sampai sini
+
+            if (data.ok) {
+                console.log('%cPesan berhasil dikirim ke Telegram.', 'color: green;');
+                 // Tidak update status utama, hanya log konsol
+            } else {
+                console.error('Gagal mengirim pesan ke Telegram (respons API):', data.description);
+                alert(`Gagal mengirim notifikasi Telegram: ${data.description}`); // Beri tahu pengguna
+            }
+        } catch (error) {
+            console.error('Error saat mengirim pesan ke Telegram (kemungkinan besar CORS):', error);
+            alert("Gagal mengirim notifikasi Telegram. Kemungkinan besar karena pembatasan CORS browser. Cek konsol (F12) untuk detail.");
+        }
+    }
+
+    /**
+     * Memeriksa saldo dari API Unminable dan mengirim notifikasi jika berubah
+     */
+    async function checkBalanceAndNotify() {
+        console.log(`(${new Date().toLocaleString()}) Memeriksa saldo...`);
+        statusMessageElement.textContent = "Memeriksa saldo...";
+        statusMessageElement.style.color = 'orange';
+
+        try {
+            const response = await fetch(UNMINABLE_API_URL);
+
+            if (!response.ok) {
+                let errorMsg = `Gagal mengambil data Unminable: Status ${response.status}`;
+                if (response.status === 0 || response.type === 'opaque') {
+                    errorMsg = 'Gagal mengambil data Unminable: Kemungkinan masalah CORS atau jaringan.';
+                }
+                throw new Error(errorMsg);
+            }
+
+            const result = await response.json();
+
+             if (!result.success || !result.data) {
+                let apiErrorMsg = 'API Unminable mengembalikan respons yang tidak sukses.';
+                if(result.msg) {
+                    apiErrorMsg += ` Pesan: ${result.msg}`;
+                }
+                throw new Error(apiErrorMsg);
+            }
+
+            const currentBalance = result.data.balance;
+
+            // Update tampilan di HTML
+            balanceValueElement.textContent = currentBalance + " PEPE";
+            lastCheckedElement.textContent = new Date().toLocaleString();
+            statusMessageElement.textContent = "OK";
+            statusMessageElement.style.color = 'green';
+
+            console.log(`Saldo saat ini: ${currentBalance}`);
+
+            if (previousBalance === null) {
+                previousBalance = currentBalance;
+                console.log('Saldo awal dicatat.');
+                statusMessageElement.textContent = "Saldo awal dicatat";
+                // await sendTelegramMessage(`ℹ️ Pemantauan saldo dimulai di browser. Saldo awal: ${currentBalance}`);
+            } else if (currentBalance !== previousBalance) {
+                console.log(`%cPerubahan saldo terdeteksi! Saldo sebelumnya: ${previousBalance}, Saldo baru: ${currentBalance}`, 'color: blue; font-weight: bold;');
+                statusMessageElement.textContent = "Perubahan Saldo Terdeteksi!";
+                statusMessageElement.style.color = 'blue';
+                const message = `💰 *Perubahan Saldo (Browser)*\n\nSebelumnya: \`${previousBalance}\`\nSekarang: \`${currentBalance}\` PEPE`;
+                await sendTelegramMessage(message); // Coba kirim notifikasi
+                previousBalance = currentBalance;
+            } else {
+                console.log('Saldo tidak berubah.');
+                statusMessageElement.textContent = "OK (Saldo tidak berubah)";
+                 statusMessageElement.style.color = 'green';
+            }
+
+        } catch (error) {
+            console.error('Error saat memeriksa saldo Unminable:', error);
+            balanceValueElement.textContent = "Error";
+            statusMessageElement.textContent = `Error: ${error.message}`;
+            statusMessageElement.style.color = 'red';
+            lastCheckedElement.textContent = new Date().toLocaleString();
+            // await sendTelegramMessage(`🚫 Error saat menjalankan cek saldo di browser: ${error.message}`);
+        }
+    }
+
+    // --- Fungsi untuk Memulai dan Menghentikan Pemantauan ---
+    function startMonitoring() {
+        if (intervalId) {
+            console.warn("Pemantauan sudah berjalan.");
+            alert("Pemantauan sudah berjalan.");
+            return;
+        }
+
+        // Validasi konfigurasi sebelum memulai
+         if (TELEGRAM_BOT_TOKEN === 'GANTI_DENGAN_TOKEN_BOT_ANDA' || TELEGRAM_CHAT_ID === 'GANTI_DENGAN_CHAT_ID_ANDA') {
+            console.error("Kesalahan Konfigurasi: Harap ganti placeholder TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID di dalam kode HTML.");
+            alert("Kesalahan Konfigurasi: Harap edit file HTML ini dan ganti placeholder Token Bot serta Chat ID sebelum menekan Start!");
+            statusMessageElement.textContent = "Error Konfigurasi!";
+            statusMessageElement.style.color = 'red';
+            return;
+        }
+
+        console.log('%cMemulai pemantauan saldo Unminable...', 'color: green; font-weight: bold;');
+        statusMessageElement.textContent = "Memulai...";
+        statusMessageElement.style.color = 'blue';
+
+
+        // Jalankan pemeriksaan pertama kali segera
+        checkBalanceAndNotify();
+
+        // Atur pemeriksaan berkala
+        intervalId = setInterval(checkBalanceAndNotify, CHECK_INTERVAL_MS);
+        console.log(`Pemantauan diatur untuk berjalan setiap ${CHECK_INTERVAL_MS / 1000} detik. ID Interval: ${intervalId}`);
+        statusMessageElement.textContent = "Monitoring Aktif";
+         statusMessageElement.style.color = 'green';
+
+        // Memberi tahu pengguna cara stop (jika mereka tidak lihat tombol)
+        console.log("Klik tombol 'Stop Monitoring' untuk berhenti.");
+    }
+
+    function stopMonitoring() {
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+            console.log('%cPemantauan saldo dihentikan.', 'color: red; font-weight: bold;');
+            statusMessageElement.textContent = "Dihentikan";
+            statusMessageElement.style.color = 'red';
+        } else {
+            console.log("Pemantauan tidak sedang berjalan.");
+             statusMessageElement.textContent = "Idle (Sudah berhenti)";
+             statusMessageElement.style.color = 'grey';
+        }
+    }
+
+    // Inisialisasi tampilan saat halaman dimuat
+     window.onload = () => {
+         statusMessageElement.textContent = "Idle";
+         statusMessageElement.style.color = 'grey';
+         balanceValueElement.textContent = "Belum dimulai";
+         // Anda bisa memilih untuk memulai otomatis di sini jika mau:
+         // startMonitoring();
+         // Tapi tombol memberikan kontrol lebih baik.
+     };
+
+</script>
+
+</body>
+</html>
